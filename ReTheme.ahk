@@ -1325,7 +1325,7 @@ class RT {
             RT.Select(ctx.hdc, oldFont)
     }
 
-    static ActivePalette := "", Rules := [], Hooked := false, CtlCache := Map(), BorderMap := Map(), BordersSet := Map(), StatusBarTexts := Map(), RadioTextMap := Map(), RadioTextReverseMap := Map(), OriginalRadioTexts := Map(), ButtonHoverMap := Map(), fnSetPreferredAppMode := 0, fnFlushMenuThemes := 0, ListViewRedrawTimers := Map(), HeaderTexts := Map(), HeaderFormats := Map(), ListViews := Map(), RootWindows := Map(), Attached := Map()
+    static ActivePalette := "", Rules := [], Hooked := false, CtlCache := Map(), BorderMap := Map(), BordersSet := Map(), StatusBarTexts := Map(), RadioTextMap := Map(), RadioTextReverseMap := Map(), OriginalRadioTexts := Map(), ButtonHoverMap := Map(), fnSetPreferredAppMode := 0, fnFlushMenuThemes := 0, ListViewRedrawTimers := Map(), HeaderTexts := Map(), HeaderFormats := Map(), ListViews := Map(), RootWindows := Map(), Attached := Map(), Reapplying := false
 
     static FindRule(sel, def := "") {
         for r in this.Rules
@@ -1519,7 +1519,7 @@ class RT {
 
     static Apply(hwnd, isRoot := true) {
         try {
-            if isRoot ? this.RootWindows.Has(hwnd) : (this.Attached.Has(hwnd) || this.BordersSet.Has(hwnd) || RT.RadioTextMap.Has(hwnd))
+            if !this.Reapplying && (isRoot ? this.RootWindows.Has(hwnd) : (this.Attached.Has(hwnd) || this.BordersSet.Has(hwnd) || RT.RadioTextMap.Has(hwnd)))
                 return
             if isRoot && (RT.Style(hwnd) & 0x40000000)
                 isRoot := false
@@ -1564,7 +1564,9 @@ class RT {
         for childHwnd in this.GetChildWindows(hwnd) {
             if isColorDlg
                 continue
-            if this.Attached.Has(childHwnd) || this.BordersSet.Has(childHwnd) || RT.RadioTextMap.Has(childHwnd)
+            if this.BordersSet.Has(childHwnd) || RT.RadioTextMap.Has(childHwnd)
+                continue
+            if !RT.Reapplying && this.Attached.Has(childHwnd)
                 continue
             classNN := RT.GetClassName(childHwnd)
             if InStr("|SysHeader32|ComboLBox|", "|" classNN "|")
@@ -2117,30 +2119,35 @@ class RT {
     }
 
     static ApplyThemeToAllWindows() {
-        processId := DllCall("kernel32\GetCurrentProcessId", "UInt")
-        _EnumProc(hwnd, lParam) {
-            DllCall("user32\GetWindowThreadProcessId", "Ptr", hwnd, "Ptr*", &wndProcId := 0)
-            if (wndProcId == processId) {
-                try {
-                    class := WinGetClass(hwnd)
-                    if (class == "AutoHotkeyGUI" || class == "#32770") {
-                        bgCol := (RT.CtlCache.Has(hwnd) && RT.CtlCache[hwnd].Has("Bg")) ? RT.CtlCache[hwnd]["Bg"] : "BaseBg"
-                        resolvedBg := (RT.ActivePalette && RT.ActivePalette.RGB.Has(bgCol)) ? RT.ActivePalette.RGB[bgCol] : RT.ParseColor(bgCol).RGB
-                        try GuiFromHwnd(hwnd).BackColor := resolvedBg
-                        RT.DWM_Apply(hwnd, RT.ActivePalette)
-                        isDarkVal := (RT.CtlCache.Has(hwnd) && RT.CtlCache[hwnd].Has("IsDark")) ? RT.CtlCache[hwnd]["IsDark"] : (RT.ActivePalette.IsDark ? 1 : 0)
-                        try DllCall("uxtheme\133", "Ptr", hwnd, "Int", isDarkVal)
-                        RT.Apply(hwnd, true)
-                        DllCall("user32\SetWindowPos", "Ptr", hwnd, "Ptr", 0, "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UInt", 0x0037)
-                        DllCall("user32\RedrawWindow", "Ptr", hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0185)
+        RT.Reapplying := true
+        try {
+            processId := DllCall("kernel32\GetCurrentProcessId", "UInt")
+            _EnumProc(hwnd, lParam) {
+                DllCall("user32\GetWindowThreadProcessId", "Ptr", hwnd, "Ptr*", &wndProcId := 0)
+                if (wndProcId == processId) {
+                    try {
+                        class := WinGetClass(hwnd)
+                        if (class == "AutoHotkeyGUI" || class == "#32770") {
+                            bgCol := (RT.CtlCache.Has(hwnd) && RT.CtlCache[hwnd].Has("Bg")) ? RT.CtlCache[hwnd]["Bg"] : "BaseBg"
+                            resolvedBg := (RT.ActivePalette && RT.ActivePalette.RGB.Has(bgCol)) ? RT.ActivePalette.RGB[bgCol] : RT.ParseColor(bgCol).RGB
+                            try GuiFromHwnd(hwnd).BackColor := resolvedBg
+                            RT.DWM_Apply(hwnd, RT.ActivePalette)
+                            isDarkVal := (RT.CtlCache.Has(hwnd) && RT.CtlCache[hwnd].Has("IsDark")) ? RT.CtlCache[hwnd]["IsDark"] : (RT.ActivePalette.IsDark ? 1 : 0)
+                            try DllCall("uxtheme\133", "Ptr", hwnd, "Int", isDarkVal)
+                            RT.Apply(hwnd, true)
+                            DllCall("user32\SetWindowPos", "Ptr", hwnd, "Ptr", 0, "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UInt", 0x0037)
+                            DllCall("user32\RedrawWindow", "Ptr", hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0185)
+                        }
                     }
                 }
+                return 1
             }
-            return 1
+            cb := CallbackCreate(_EnumProc, "F", 2)
+            DllCall("user32\EnumWindows", "Ptr", cb, "Ptr", 0)
+            CallbackFree(cb)
+        } finally {
+            RT.Reapplying := false
         }
-        cb := CallbackCreate(_EnumProc, "F", 2)
-        DllCall("user32\EnumWindows", "Ptr", cb, "Ptr", 0)
-        CallbackFree(cb)
     }
 
     static UpdateMenuTheme() {
@@ -2161,8 +2168,13 @@ class RT {
             return false
         RT.ActivePalette := RT.Palette(cfg)
         RT.UpdateMenuTheme()
-        RT.CtlCache := Map()
-        RT.Attached := Map()
+        
+        newUserCache := Map()
+        for hwnd, rule in RT.CtlCache {
+            if !rule.Has("Selector")
+                newUserCache[hwnd] := rule
+        }
+        RT.CtlCache := newUserCache
         RT.StatusBarTexts := Map()
         RT.Depths := Map()
 
