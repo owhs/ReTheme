@@ -253,13 +253,24 @@ class RT {
     }
 
     static DWM_Apply(hwnd, paletteObj) {
+        rule := RT.CtlCache.Has(hwnd) ? RT.CtlCache[hwnd] : Map()
         attrDark := (VerCompare(A_OSVersion, "10.0.22000") >= 0) ? 20 : 19
-        RT.DWMAttr(hwnd, attrDark, paletteObj.IsDark ? 1 : 0)
-        RT.DWMAttr(hwnd, 33, paletteObj.IsDark ? 2 : 0)
+        isDarkVal := rule.Has("IsDark") ? rule["IsDark"] : (paletteObj.IsDark ? 1 : 0)
+        RT.DWMAttr(hwnd, attrDark, isDarkVal)
+        
+        cornersVal := rule.Has("Corners") ? rule["Corners"] : (paletteObj.IsDark ? 2 : 0)
+        RT.DWMAttr(hwnd, 33, cornersVal)
+        
         if (VerCompare(A_OSVersion, "10.0.22000") >= 0) {
             for item in [["Border", 34], ["CaptionBg", 35], ["CaptionFg", 36]] {
-                if paletteObj.BGR.Has(item[1])
-                    RT.DWMAttr(hwnd, item[2], paletteObj.BGR[item[1]])
+                colorKey := item[1]
+                if rule.Has(colorKey) {
+                    val := rule[colorKey]
+                    bgr := (paletteObj && paletteObj.BGR.Has(val)) ? paletteObj.BGR[val] : RT.ParseColor(val).BGR
+                    RT.DWMAttr(hwnd, item[2], bgr)
+                } else if paletteObj && paletteObj.BGR.Has(colorKey) {
+                    RT.DWMAttr(hwnd, item[2], paletteObj.BGR[colorKey])
+                }
             }
         }
     }
@@ -339,6 +350,23 @@ class RT {
         buf := Buffer(128, 0)
         DllCall("user32\GetClassNameW", "Ptr", hwnd, "Ptr", buf.Ptr, "Int", 128)
         return StrGet(buf)
+    }
+    static IsColorDialog(hwnd) {
+        if (RT.GetClassName(hwnd) != "#32770")
+            return false
+        for id in [706, 707, 708, 720, 1038] {
+            if DllCall("user32\GetDlgItem", "Ptr", hwnd, "Int", id, "Ptr")
+                return true
+        }
+        return false
+    }
+    static GetRoot(hwnd) {
+        loop {
+            parent := DllCall("user32\GetParent", "Ptr", hwnd, "Ptr")
+            if !parent
+                return hwnd
+            hwnd := parent
+        }
     }
 
     static ClassCache := Map()
@@ -1512,16 +1540,20 @@ class RT {
         }
 
         this.CtlCache[hwnd] := this.FindRule(classNN)
-        if classNN = "#32770" {
+        isColorDlg := RT.IsColorDialog(hwnd)
+        if classNN = "#32770" && !isColorDlg {
             try RT.Theme(hwnd, RT.ExplorerTheme)
             try DllCall("uxtheme\EnableThemeDialogTexture", "Ptr", hwnd, "UInt", 2)
         }
 
         if isRoot {
             RT.RootWindows[hwnd] := true
-            try GuiFromHwnd(hwnd).BackColor := this.ActivePalette.RGB["BaseBg"]
+            bgCol := (this.CtlCache.Has(hwnd) && this.CtlCache[hwnd].Has("Bg")) ? this.CtlCache[hwnd]["Bg"] : "BaseBg"
+            resolvedBg := (this.ActivePalette && this.ActivePalette.RGB.Has(bgCol)) ? this.ActivePalette.RGB[bgCol] : RT.ParseColor(bgCol).RGB
+            try GuiFromHwnd(hwnd).BackColor := resolvedBg
             RT.DWM_Apply(hwnd, this.ActivePalette)
-            try DllCall("uxtheme\133", "Ptr", hwnd, "Int", this.ActivePalette.IsDark ? 1 : 0)
+            isDarkVal := (this.CtlCache.Has(hwnd) && this.CtlCache[hwnd].Has("IsDark")) ? this.CtlCache[hwnd]["IsDark"] : (this.ActivePalette.IsDark ? 1 : 0)
+            try DllCall("uxtheme\133", "Ptr", hwnd, "Int", isDarkVal)
             RT.Attach(hwnd)
             RT.Send(hwnd, 0x0127, 0x00030001, 0)
             RT.RegisterThemesMenu(hwnd)
@@ -1529,6 +1561,8 @@ class RT {
         }
 
         for childHwnd in this.GetChildWindows(hwnd) {
+            if isColorDlg
+                continue
             if this.Attached.Has(childHwnd) || this.BordersSet.Has(childHwnd) || RT.RadioTextMap.Has(childHwnd)
                 continue
             classNN := RT.GetClassName(childHwnd)
@@ -1841,6 +1875,9 @@ class RT {
     }
 
     static OnCtlColorInternal(wParam, lParam, msg, hwnd) {
+        root := RT.GetRoot(lParam)
+        if (root && RT.IsColorDialog(root))
+            return
         if !RT.CtlCache.Has(lParam) {
             buf := Buffer(256)
             DllCall("user32\GetClassNameW", "Ptr", lParam, "Ptr", buf.Ptr, "Int", 256)
@@ -2086,9 +2123,12 @@ class RT {
                 try {
                     class := WinGetClass(hwnd)
                     if (class == "AutoHotkeyGUI" || class == "#32770") {
-                        try GuiFromHwnd(hwnd).BackColor := RT.ActivePalette.RGB["BaseBg"]
+                        bgCol := (RT.CtlCache.Has(hwnd) && RT.CtlCache[hwnd].Has("Bg")) ? RT.CtlCache[hwnd]["Bg"] : "BaseBg"
+                        resolvedBg := (RT.ActivePalette && RT.ActivePalette.RGB.Has(bgCol)) ? RT.ActivePalette.RGB[bgCol] : RT.ParseColor(bgCol).RGB
+                        try GuiFromHwnd(hwnd).BackColor := resolvedBg
                         RT.DWM_Apply(hwnd, RT.ActivePalette)
-                        try DllCall("uxtheme\133", "Ptr", hwnd, "Int", RT.ActivePalette.IsDark ? 1 : 0)
+                        isDarkVal := (RT.CtlCache.Has(hwnd) && RT.CtlCache[hwnd].Has("IsDark")) ? RT.CtlCache[hwnd]["IsDark"] : (RT.ActivePalette.IsDark ? 1 : 0)
+                        try DllCall("uxtheme\133", "Ptr", hwnd, "Int", isDarkVal)
                         RT.Apply(hwnd, true)
                         DllCall("user32\SetWindowPos", "Ptr", hwnd, "Ptr", 0, "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UInt", 0x0037)
                         DllCall("user32\RedrawWindow", "Ptr", hwnd, "Ptr", 0, "Ptr", 0, "UInt", 0x0185)
@@ -2304,10 +2344,10 @@ class RT {
             for col in colors {
                 g.Add("Text", "x10 y" . (y + 4) . " w70", col . ":")
                 preview := g.Add("Text", "x90 y" . y . " w30 h22 +Border +0x100")
-                preview.OnEvent("Click", RT.ThemeEditor.OnColorClick.Bind(col))
+                preview.OnEvent("Click", RT.ThemeEditor.OnColorClick.Bind(RT.ThemeEditor, col))
                 edit := g.Add("Edit", "x130 y" . y . " w90 h22 +ReadOnly")
                 btnChoose := g.Add("Button", "x230 y" . (y - 1) . " w100 h24", "Choose...")
-                btnChoose.OnEvent("Click", RT.ThemeEditor.OnColorClick.Bind(col))
+                btnChoose.OnEvent("Click", RT.ThemeEditor.OnColorClick.Bind(RT.ThemeEditor, col))
                 RT.ThemeEditor.colorCtrls[col] := { preview: preview, edit: edit }
                 y += 32
             }
@@ -2339,13 +2379,33 @@ class RT {
 
         static OnThemeChange() {
             themeName := RT.ThemeEditor.listThemes.Text
+            if (themeName == "") {
+                try {
+                    idx := RT.ThemeEditor.listThemes.Value
+                    if idx > 0 {
+                        themes := RT.GetThemesList()
+                        if idx <= themes.Length
+                            themeName := themes[idx]
+                    }
+                }
+            }
             if (themeName == "")
-                return
-            RT.ThemeEditor.selectedTheme := themeName
+                themeName := RT.CurrentThemeName
+            
             cfg := RT.LoadThemeFromIni(themeName)
-            if !cfg
-                return
-            RT.ThemeEditor.currentColors := cfg.Clone()
+            
+            defaultColors := Map("BaseBg", "121212", "Surface", "1E1E1E", "Text", "E0E0E0", "Accent", "0078D4", "Border", "333333", "Header", "1E1E1E", "FgDim", "888888")
+            RT.ThemeEditor.currentColors := Map()
+            for k, v in defaultColors {
+                if cfg && cfg.Has(k)
+                    RT.ThemeEditor.currentColors[k] := cfg[k]
+                else if RT.ActivePalette && RT.ActivePalette.RGB.Has(k)
+                    RT.ThemeEditor.currentColors[k] := RT.ActivePalette.RGB[k]
+                else
+                    RT.ThemeEditor.currentColors[k] := v
+            }
+            
+            RT.ThemeEditor.selectedTheme := themeName
             RT.CurrentThemeName := themeName
             RT.SetTheme(themeName)
             RT.ThemeEditor.UpdateColorDisplay()
