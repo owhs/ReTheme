@@ -2,6 +2,8 @@
 
 ReTheme is a skinning and custom theme engine for AutoHotkey v2 GUI windows. It supports dark mode, custom color schemes, system menu integrations, and an interactive live Theme Editor.
 
+See - https://www.autohotkey.com/boards/viewtopic.php?f=83&t=140841
+
 ## Basic Usage
 
 To apply the default theme (Default Dark) to a GUI window, include the script and call `Apply` with the window's HWND:
