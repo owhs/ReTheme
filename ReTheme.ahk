@@ -1519,7 +1519,7 @@ class RT {
 
     static Apply(hwnd, isRoot := true) {
         try {
-            if this.CtlCache.Has(hwnd)
+            if isRoot ? this.RootWindows.Has(hwnd) : (this.Attached.Has(hwnd) || this.BordersSet.Has(hwnd) || RT.RadioTextMap.Has(hwnd))
                 return
             if isRoot && (RT.Style(hwnd) & 0x40000000)
                 isRoot := false
@@ -1539,7 +1539,8 @@ class RT {
         catch {
         }
 
-        this.CtlCache[hwnd] := this.FindRule(classNN)
+        if !this.CtlCache.Has(hwnd)
+            this.CtlCache[hwnd] := this.FindRule(classNN)
         isColorDlg := RT.IsColorDialog(hwnd)
         if classNN = "#32770" && !isColorDlg {
             try RT.Theme(hwnd, RT.ExplorerTheme)

@@ -14,6 +14,17 @@ MyConfig := Map(
 )
 RT.Init(RT.Palette(MyConfig))
 RT.Config.EnableEditorHotkey := false
+
+RT.CtlCache[Main.Hwnd] := Map(
+    "CaptionBg", "2e0854",    ; Title bar color (Deep Purple)
+    "CaptionFg", "ff0000",    ; Title bar text color (White)
+    "Border", "448e3a",       ; Thin window frame border color (Accent green)
+    "Bg", "15102a",           ; Custom window background color (Dark violet)
+    "IsDark", 1,              ; Force dark mode titlebar buttons/style (0 to force light mode)
+    "Corners", 3              ; Corners preference: 1=Square, 2=Round, 3=Slightly round
+)
+
+
 RT.CtlCache[customBtn.Hwnd] := Map(
     "Bg", "FF003C",
     "Fg", "00FFEA",
@@ -29,6 +40,8 @@ RT.CtlCache[customBtn.Hwnd] := Map(
     "DisabledBorder", "ffff00",
     "Cursor", "UpArrow"
 )
+
+
 RT.Apply(Main.Hwnd)
 
 ;#endregion
